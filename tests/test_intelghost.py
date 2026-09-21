@@ -44,13 +44,28 @@ class IntelGhostTests(unittest.TestCase):
         self.assertEqual(mod.classify(["x86_64", "arm64"]), "universal")
         self.assertEqual(mod.classify(["arm64e"]), "apple_silicon_only")
 
+    def test_component_owner_for_nested_bundle(self):
+        mod = load_module()
+        path = Path("/Library/Audio/Plug-Ins/VST/Legacy.vst/Contents/MacOS/Legacy")
+        self.assertEqual(
+            mod.component_for(path),
+            {
+                "name": "Legacy.vst",
+                "type": "vst",
+                "path": "/Library/Audio/Plug-Ins/VST/Legacy.vst",
+            },
+        )
+
     def test_json_scan_with_fake_lipo(self):
         with TemporaryDirectory() as td:
             tmp_path = Path(td)
             make_fake_lipo(tmp_path)
             fixture_dir = tmp_path / "fixtures"
             fixture_dir.mkdir()
-            macho_file(fixture_dir / "legacy-intel.bundle")
+            legacy_dir = fixture_dir / "Legacy.vst" / "Contents" / "MacOS"
+            legacy_dir.mkdir(parents=True)
+            macho_file(legacy_dir / "legacy-intel")
+            macho_file(legacy_dir / "legacy-intel-helper")
             macho_file(fixture_dir / "modern-universal.bundle")
             (fixture_dir / "plain.txt").write_text("not macho", encoding="utf-8")
             env = os.environ.copy()
@@ -64,8 +79,10 @@ class IntelGhostTests(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, 2, proc.stderr + proc.stdout)
             data = json.loads(proc.stdout)
-            self.assertEqual(data["intel_only_count"], 1)
-            self.assertTrue(data["findings"][0]["path"].endswith("legacy-intel.bundle"))
+            self.assertEqual(data["intel_only_count"], 2)
+            self.assertEqual(data["affected_component_count"], 1)
+            self.assertEqual(data["findings"][0]["component"], "Legacy.vst")
+            self.assertEqual(data["findings"][0]["component_type"], "vst")
             self.assertEqual(data["findings"][0]["archs"], ["x86_64"])
 
     def test_text_scan_no_findings(self):
@@ -86,6 +103,7 @@ class IntelGhostTests(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, 0, proc.stderr + proc.stdout)
             self.assertIn("Intel-only findings: 0", proc.stdout)
+            self.assertIn("Affected components: 0", proc.stdout)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 
 IntelGhost is a small, dependency-free, read-only CLI that looks for scoped Intel-only Mach-O components before the macOS 28 Rosetta cutoff.
 
-Apple's own Settings list can miss plugins, loaders, helpers, and developer artifacts. IntelGhost scans common app/plugin locations and reports binaries that contain Intel architectures (`x86_64` or `i386`) without Apple Silicon (`arm64` or `arm64e`).
+Apple's own Settings list can miss plugins, loaders, helpers, and developer artifacts. IntelGhost scans common app/plugin locations and reports binaries that contain Intel architectures (`x86_64` or `i386`) without Apple Silicon (`arm64` or `arm64e`). It groups nested binaries under their nearest owning app, plug-in, framework, or extension bundle so one old product does not look like many unrelated problems.
 
 ## Install / run
 
@@ -28,7 +28,7 @@ By default IntelGhost scans a bounded set of common locations:
 - LaunchAgents / LaunchDaemons
 - Homebrew roots (`/usr/local/Homebrew`, `/opt/homebrew`)
 
-For every Mach-O candidate it calls `lipo -archs` and reports only Intel-only findings.
+For every Mach-O candidate it calls `lipo -archs` and reports only Intel-only findings. Each finding includes the nearest recognized component bundle (`.app`, `.vst`, `.vst3`, `.component`, `.bundle`, `.plugin`, `.framework`, `.kext`, `.qlgenerator`, or `.mdimporter`) plus an aggregate affected-component count.
 
 ## Safety
 
@@ -44,6 +44,7 @@ For every Mach-O candidate it calls `lipo -archs` and reports only Intel-only fi
 - Universal binaries are not flagged even if some plugins inside a package have separate issues.
 - Rosetta detection is best-effort and may change in future macOS releases.
 - The default path list is intentionally conservative and will not find every possible binary on disk.
+- Bundle grouping is path-based. It helps identify a likely owner but does not prove installation provenance or which vendor should remove the file.
 
 ## Exit codes
 
@@ -53,9 +54,10 @@ For every Mach-O candidate it calls `lipo -archs` and reports only Intel-only fi
 ## Example
 
 ```text
-IntelGhost v0.1.0 — read-only Intel-only component scan
+IntelGhost v0.2.0 — read-only Intel-only component scan
 Rosetta: installed
 Mach-O scanned: 42  skipped: 0
 Intel-only findings: 1
-- /Library/Audio/Plug-Ins/VST/OldPlugin.vst/Contents/MacOS/OldPlugin :: x86_64 :: update/remove before macOS 28
+Affected components: 1
+- OldPlugin.vst [vst] :: /Library/Audio/Plug-Ins/VST/OldPlugin.vst/Contents/MacOS/OldPlugin :: x86_64 :: update or remove via its owner before macOS 28
 ```

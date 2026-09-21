@@ -11,8 +11,20 @@ import sys
 from pathlib import Path
 from typing import Iterable
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 MACHO_MAGICS = {b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xca\xfe\xba\xbe", b"\xca\xfe\xba\xbf"}
+COMPONENT_SUFFIXES = {
+    ".app": "app",
+    ".bundle": "bundle",
+    ".component": "audio_component",
+    ".framework": "framework",
+    ".kext": "kernel_extension",
+    ".mdimporter": "spotlight_importer",
+    ".plugin": "plugin",
+    ".qlgenerator": "quicklook_generator",
+    ".vst": "vst",
+    ".vst3": "vst3",
+}
 DEFAULT_DIRS = [
     "~/Applications",
     "/Applications",
@@ -53,7 +65,9 @@ def iter_files(roots: Iterable[Path], max_files: int) -> Iterable[Path]:
             yield root
             continue
         for dirpath, dirnames, filenames in os.walk(root, topdown=True):
-            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.endswith(".app/Contents/Resources")]
+            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+            if Path(dirpath).name == "Contents":
+                dirnames[:] = [d for d in dirnames if d != "Resources"]
             for name in filenames:
                 seen += 1
                 if seen > max_files:
@@ -85,6 +99,18 @@ def classify(archs: list[str]) -> str:
     return "unknown"
 
 
+def component_for(path: Path) -> dict[str, str]:
+    for candidate in (path, *path.parents):
+        suffix = candidate.suffix.lower()
+        if suffix in COMPONENT_SUFFIXES:
+            return {
+                "name": candidate.name,
+                "type": COMPONENT_SUFFIXES[suffix],
+                "path": str(candidate),
+            }
+    return {"name": path.name, "type": "binary", "path": str(path)}
+
+
 def rosetta_state() -> str:
     marker = Path("/Library/Apple/usr/share/rosetta/rosetta")
     if marker.exists():
@@ -111,7 +137,16 @@ def scan(paths: list[str], max_files: int) -> dict:
             continue
         kind = classify(archs)
         if kind == "intel_only":
-            results.append({"path": str(path), "archs": archs, "risk": "macOS_28_incompatible_unless_updated"})
+            component = component_for(path)
+            results.append({
+                "path": str(path),
+                "archs": archs,
+                "component": component["name"],
+                "component_type": component["type"],
+                "component_path": component["path"],
+                "risk": "macOS_28_incompatible_unless_updated",
+            })
+    affected_components = len({item["component_path"] for item in results})
     return {
         "tool": "intelghost",
         "version": VERSION,
@@ -120,6 +155,7 @@ def scan(paths: list[str], max_files: int) -> dict:
         "scanned_macho_files": scanned,
         "skipped_macho_files": skipped,
         "intel_only_count": len(results),
+        "affected_component_count": affected_components,
         "findings": results,
         "note": "Read-only scoped scan; findings are clues, not proof that a component is loaded or still needed.",
     }
@@ -131,8 +167,12 @@ def print_text(report: dict, quiet: bool) -> None:
         print(f"Rosetta: {report['rosetta']}")
         print(f"Mach-O scanned: {report['scanned_macho_files']}  skipped: {report['skipped_macho_files']}")
     print(f"Intel-only findings: {report['intel_only_count']}")
+    print(f"Affected components: {report['affected_component_count']}")
     for item in report["findings"]:
-        print(f"- {item['path']} :: {','.join(item['archs'])} :: update/remove before macOS 28")
+        print(
+            f"- {item['component']} [{item['component_type']}] :: {item['path']} :: "
+            f"{','.join(item['archs'])} :: update or remove via its owner before macOS 28"
+        )
     if not quiet and not report["findings"]:
         print("No Intel-only Mach-O components found in the scoped paths.")
 
