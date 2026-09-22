@@ -6,6 +6,8 @@ Apple's own Settings list can miss plugins, loaders, helpers, and developer arti
 
 ## Install / run
 
+Requires Python 3.10+ and macOS Command Line Tools (`lipo`). No Python packages to install.
+
 ```bash
 curl -L -o intelghost https://github.com/00xmorty/intelghost/releases/latest/download/intelghost
 chmod +x intelghost
@@ -17,6 +19,7 @@ From a clone:
 ```bash
 python3 ./intelghost --path /Applications --max-files 5000
 python3 ./intelghost --json --path ~/Library/Audio/Plug-Ins
+python3 ./intelghost --include-bundled --json --path /Applications/Example.app --max-files 5000
 ```
 
 ## What it checks
@@ -37,6 +40,28 @@ For every Mach-O candidate it calls `lipo -archs` and reports only Intel-only fi
 - Scoped scan with `--max-files` safety cap.
 - Reports local paths because paths are necessary for diagnosis; review/redact output before sharing it.
 
+## Bundled helpers and scan coverage (v0.3.0)
+
+Default recursive scans skip `Contents/Resources` and `node_modules`. These can
+contain executable helpers, so a zero-finding app-root scan is **not** a whole-app
+compatibility certificate. v0.3.0 prints this scope warning even with `--quiet`.
+Use `--include-bundled` to include both directory types while retaining the file
+cap. For an error naming a specific helper, `--path /path/to/helper` inspects that
+file directly in either mode. Scanned binaries are never executed.
+
+Both modes still exclude `.git`, `__pycache__`, `Caches`, and `DerivedData` during
+recursion and do not follow directory symlinks. Explicit root paths are resolved;
+file symlinks may be read. Choose trusted, narrow paths, not an entire disk.
+
+JSON adds `coverage.include_bundled`, `excluded_directories`,
+`excludes_contents_resources`, `visited_files`, `max_files`, and
+`file_limit_reached`. The cap counts files across all roots, including explicit
+file arguments, not only Mach-O files. `file_limit_reached: true` means another
+file was omitted; text output also warns that results are partial. Narrow the
+scope or deliberately increase the cap. A false flag does not prove coverage:
+missing paths, permission failures, excluded directories and non-recognized
+binary formats can still hide components. Expanded scans may be slower.
+
 ## Limitations
 
 - macOS-focused. On Linux CI it is tested with fixtures and fake `lipo`; real scanning needs macOS tools.
@@ -51,10 +76,23 @@ For every Mach-O candidate it calls `lipo -archs` and reports only Intel-only fi
 - `0`: no Intel-only findings
 - `2`: one or more Intel-only findings
 
-## Example
+Exit codes describe findings only, not completeness. Automation must inspect
+`coverage` and `skipped_macho_files`; zero never certifies compatibility.
+
+## Verification
+
+```sh
+python3 -m unittest discover -s tests -v
+python3 tests/smoke_compiled.py  # macOS: real clang/lipo, compile-only objects
+```
+
+CI runs fixture-backed unit tests on Linux and macOS, plus real Intel/ARM
+compile-only integration on macOS. The compiled objects are not executed.
+
+## Illustrative output (not a device measurement)
 
 ```text
-IntelGhost v0.2.0 — read-only Intel-only component scan
+IntelGhost v0.3.0 — read-only Intel-only component scan
 Rosetta: installed
 Mach-O scanned: 42  skipped: 0
 Intel-only findings: 1

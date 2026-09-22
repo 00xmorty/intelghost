@@ -1,11 +1,14 @@
-# IntelGhost v0.2.0
+# IntelGhost v0.3.0
 
-Bundle-aware reporting release.
+Opt-in bundled-helper coverage and explicit scan limits.
 
-- Groups nested Intel-only binaries under the nearest recognized app, plug-in, framework, or extension bundle.
-- Adds `component`, `component_type`, and `component_path` to each JSON finding.
-- Adds `affected_component_count` so multiple binaries inside one legacy product count as one component.
-- Skips app `Contents/Resources` directories to reduce irrelevant file visits while retaining executable and helper scans.
-- Adds fixture-backed VST ownership and multi-binary grouping tests.
+- Adds `--include-bundled` to traverse `Contents/Resources` and `node_modules`, which default recursive scans intentionally skip.
+- Adds JSON `coverage` metadata and text scope warnings, including in quiet mode.
+- Applies the global file cap to explicit file roots as well as recursive visits; reports when more files were omitted.
+- Keeps existing JSON finding fields and finding-based exit codes. Neither exit 0 nor `file_limit_reached: false` certifies complete coverage.
+- Adds regression tests for nested helpers, preserved exclusions, directory symlinks, global caps, JSON and text warnings.
+- Adds a macOS integration check that compiles Intel and ARM objects, detects the Intel helper in expanded mode, and verifies unchanged fixture bytes without executing either object.
 
-Safety: no deletion, no mutation, no sudo, no telemetry, no network calls.
+Default recursion stays conservative. Missing paths, unreadable entries, symlinks and unrecognized formats remain coverage limitations. Reports contain local paths; review before sharing.
+
+Safety: read-only, no deletion, no sudo, no telemetry, no network calls. Expanded scans can take longer but retain the file cap and existing per-file lipo timeout.

@@ -1,4 +1,6 @@
 name: ci
+permissions:
+  contents: read
 
 on:
   push:
@@ -23,3 +25,6 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: CLI help smoke
         run: python ./intelghost --help
+      - name: Real compiled Mach-O coverage smoke (macOS)
+        if: runner.os == 'macOS'
+        run: python tests/smoke_compiled.py

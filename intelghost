@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from typing import Iterable
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 MACHO_MAGICS = {b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xca\xfe\xba\xbe", b"\xca\xfe\xba\xbf"}
 COMPONENT_SUFFIXES = {
     ".app": "app",
@@ -56,22 +56,29 @@ def is_macho(path: Path) -> bool:
         return False
 
 
-def iter_files(roots: Iterable[Path], max_files: int) -> Iterable[Path]:
-    seen = 0
+def iter_files(roots: Iterable[Path], max_files: int, include_bundled=False, coverage=None) -> Iterable[Path]:
+    coverage = coverage if coverage is not None else {}
+    coverage.update(visited_files=0, file_limit_reached=False)
+    excluded = SKIP_DIRS - {"node_modules"} if include_bundled else SKIP_DIRS
     for root in roots:
         if not root.exists():
             continue
         if root.is_file():
+            if coverage["visited_files"] >= max_files:
+                coverage["file_limit_reached"] = True
+                return
+            coverage["visited_files"] += 1
             yield root
             continue
         for dirpath, dirnames, filenames in os.walk(root, topdown=True):
-            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
-            if Path(dirpath).name == "Contents":
+            dirnames[:] = sorted(d for d in dirnames if d not in excluded)
+            if not include_bundled and Path(dirpath).name == "Contents":
                 dirnames[:] = [d for d in dirnames if d != "Resources"]
-            for name in filenames:
-                seen += 1
-                if seen > max_files:
+            for name in sorted(filenames):
+                if coverage["visited_files"] >= max_files:
+                    coverage["file_limit_reached"] = True
                     return
+                coverage["visited_files"] += 1
                 yield Path(dirpath) / name
 
 
@@ -122,12 +129,15 @@ def rosetta_state() -> str:
         return "not_detected"
 
 
-def scan(paths: list[str], max_files: int) -> dict:
+def scan(paths: list[str], max_files: int, include_bundled=False) -> dict:
     roots = [Path(os.path.expanduser(p)).resolve() for p in paths]
+    coverage = {"include_bundled": include_bundled, "max_files": max_files,
+                "excluded_directories": sorted(SKIP_DIRS - {"node_modules"} if include_bundled else SKIP_DIRS),
+                "excludes_contents_resources": not include_bundled}
     results = []
     skipped = 0
     scanned = 0
-    for path in iter_files(roots, max_files):
+    for path in iter_files(roots, max_files, include_bundled, coverage):
         if not is_macho(path):
             continue
         scanned += 1
@@ -157,11 +167,17 @@ def scan(paths: list[str], max_files: int) -> dict:
         "intel_only_count": len(results),
         "affected_component_count": affected_components,
         "findings": results,
+        "coverage": coverage,
         "note": "Read-only scoped scan; findings are clues, not proof that a component is loaded or still needed.",
     }
 
 
 def print_text(report: dict, quiet: bool) -> None:
+    coverage = report["coverage"]
+    if not coverage["include_bundled"]:
+        print("Scope warning: recursive scans skip Contents/Resources and node_modules; use --include-bundled for helpers there.")
+    if coverage["file_limit_reached"]:
+        print("Scope warning: file limit reached; results are partial.")
     if not quiet:
         print(f"IntelGhost v{VERSION} — read-only Intel-only component scan")
         print(f"Rosetta: {report['rosetta']}")
@@ -181,11 +197,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Read-only scanner for scoped Intel-only macOS components.")
     parser.add_argument("--path", action="append", dest="paths", help="Path to scan; repeatable. Defaults to common app/plugin locations.")
     parser.add_argument("--max-files", type=int, default=20000, help="Safety cap for visited files (default: 20000).")
+    parser.add_argument("--include-bundled", action="store_true", help="Also recurse into Contents/Resources and node_modules; retains file cap.")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
-    parser.add_argument("--quiet", action="store_true", help="Only print count and findings in text mode.")
+    parser.add_argument("--quiet", action="store_true", help="Print counts, findings, and scope warnings in text mode.")
     parser.add_argument("--version", action="version", version=f"intelghost {VERSION}")
     args = parser.parse_args(argv)
-    report = scan(args.paths or DEFAULT_DIRS, max(1, args.max_files))
+    report = scan(args.paths or DEFAULT_DIRS, max(1, args.max_files), args.include_bundled)
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:

@@ -106,5 +106,79 @@ class IntelGhostTests(unittest.TestCase):
             self.assertIn("Affected components: 0", proc.stdout)
 
 
+class CoverageTests(unittest.TestCase):
+    def test_bundled_helpers_are_opt_in(self):
+        with TemporaryDirectory() as td:
+            root = Path(td) / "Fixture.app"
+            helpers = [root / "Contents/Resources/helper-intel",
+                       root / "Contents/Resources/node_modules/package/nested-intel",
+                       root / "Contents/MacOS/node_modules/package/other-intel"]
+            for helper in helpers:
+                helper.parent.mkdir(parents=True, exist_ok=True)
+                macho_file(helper)
+            mod = load_module()
+            self.assertEqual(list(mod.iter_files([root], 100)), [])
+            self.assertEqual(set(mod.iter_files([root], 100, True)), set(helpers))
+            self.assertEqual(list(mod.iter_files([helpers[0]], 100)), [helpers[0]])
+
+    def test_expanded_scan_retains_exclusions_and_no_directory_symlink_following(self):
+        with TemporaryDirectory() as td:
+            root = Path(td) / "app"
+            outside = Path(td) / "outside"
+            outside.mkdir()
+            macho_file(outside / "outside-intel")
+            root.mkdir()
+            (root / "linked").symlink_to(outside, target_is_directory=True)
+            for directory in (".git", "Caches", "DerivedData", "__pycache__"):
+                (root / directory).mkdir()
+                macho_file(root / directory / "hidden-intel")
+            self.assertEqual(list(load_module().iter_files([root], 100, True)), [])
+
+    def test_global_cap_includes_explicit_file_roots(self):
+        with TemporaryDirectory() as td:
+            paths = [Path(td) / name for name in ("first", "second", "third")]
+            for path in paths:
+                macho_file(path)
+            coverage = {}
+            found = list(load_module().iter_files(paths, 2, True, coverage))
+            self.assertEqual(found, paths[:2])
+            self.assertEqual(coverage, {"visited_files": 2, "file_limit_reached": True})
+
+    def test_exact_cap_does_not_claim_truncation(self):
+        with TemporaryDirectory() as td:
+            path = Path(td) / "one"
+            macho_file(path)
+            coverage = {}
+            self.assertEqual(list(load_module().iter_files([path], 1, True, coverage)), [path])
+            self.assertFalse(coverage["file_limit_reached"])
+
+    def test_json_expanded_scan_and_partial_warning(self):
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            make_fake_lipo(root)
+            app = root / "Fixture.app"
+            folder = app / "Contents/Resources/node_modules/example"
+            folder.mkdir(parents=True)
+            for name in ("a-intel", "b-intel"):
+                macho_file(folder / name)
+            env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ.get("PATH", ""))
+            base = [sys.executable, str(CLI), "--path", str(app), "--include-bundled", "--max-files", "1"]
+            result = subprocess.run(base + ["--json"], capture_output=True, text=True, env=env)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            data = json.loads(result.stdout)
+            self.assertEqual(data["intel_only_count"], 1)
+            self.assertEqual(data["affected_component_count"], 1)
+            self.assertTrue(data["coverage"]["include_bundled"])
+            self.assertTrue(data["coverage"]["file_limit_reached"])
+            self.assertEqual(data["coverage"]["visited_files"], 1)
+            self.assertNotIn("node_modules", data["coverage"]["excluded_directories"])
+            self.assertFalse(data["coverage"]["excludes_contents_resources"])
+            text = subprocess.run(base + ["--quiet"], capture_output=True, text=True, env=env)
+            self.assertIn("results are partial", text.stdout)
+            default = subprocess.run([sys.executable, str(CLI), "--path", str(app), "--quiet"], capture_output=True, text=True, env=env)
+            self.assertIn("--include-bundled", default.stdout)
+            self.assertEqual(default.returncode, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
