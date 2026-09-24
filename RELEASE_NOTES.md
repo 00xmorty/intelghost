@@ -1,14 +1,12 @@
-# IntelGhost v0.3.0
+# IntelGhost v0.4.0
 
-Opt-in bundled-helper coverage and explicit scan limits.
+Coverage gaps are now visible instead of silently disappearing.
 
-- Adds `--include-bundled` to traverse `Contents/Resources` and `node_modules`, which default recursive scans intentionally skip.
-- Adds JSON `coverage` metadata and text scope warnings, including in quiet mode.
-- Applies the global file cap to explicit file roots as well as recursive visits; reports when more files were omitted.
-- Keeps existing JSON finding fields and finding-based exit codes. Neither exit 0 nor `file_limit_reached: false` certifies complete coverage.
-- Adds regression tests for nested helpers, preserved exclusions, directory symlinks, global caps, JSON and text warnings.
-- Adds a macOS integration check that compiles Intel and ARM objects, detects the Intel helper in expanded mode, and verifies unchanged fixture bytes without executing either object.
+- Adds aggregate `coverage.missing_roots`, `unreadable_roots`, `unreadable_directories`, and `unreadable_files` counts to JSON, without disclosing those paths.
+- Emits a scope warning for nonzero counts in normal and quiet text output.
+- Adds fixture tests for missing inputs and denied directory/file traversal. Keeps v0.3.0 bundled-helper traversal, global file cap and existing JSON finding fields.
+- Preserves finding-based exit codes: exit 0 does not certify full coverage; inspect coverage, including skipped Mach-O files.
 
-Default recursion stays conservative. Missing paths, unreadable entries, symlinks and unrecognized formats remain coverage limitations. Reports contain local paths; review before sharing.
+Default recursion stays conservative. Permission races, symlinks and unrecognized formats remain coverage limitations. Findings contain local paths; review before sharing.
 
 Safety: read-only, no deletion, no sudo, no telemetry, no network calls. Expanded scans can take longer but retain the file cap and existing per-file lipo timeout.

@@ -142,7 +142,9 @@ class CoverageTests(unittest.TestCase):
             coverage = {}
             found = list(load_module().iter_files(paths, 2, True, coverage))
             self.assertEqual(found, paths[:2])
-            self.assertEqual(coverage, {"visited_files": 2, "file_limit_reached": True})
+            self.assertEqual(coverage["visited_files"], 2)
+            self.assertTrue(coverage["file_limit_reached"])
+            self.assertEqual(coverage["missing_roots"], 0)
 
     def test_exact_cap_does_not_claim_truncation(self):
         with TemporaryDirectory() as td:
@@ -178,6 +180,36 @@ class CoverageTests(unittest.TestCase):
             default = subprocess.run([sys.executable, str(CLI), "--path", str(app), "--quiet"], capture_output=True, text=True, env=env)
             self.assertIn("--include-bundled", default.stdout)
             self.assertEqual(default.returncode, 0)
+
+    def test_missing_root_is_reported_not_silent_even_in_quiet_mode(self):
+        with TemporaryDirectory() as td:
+            missing = Path(td) / "absent"
+            proc = subprocess.run([sys.executable, str(CLI), "--quiet", "--path", str(missing)],
+                                  capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 0)
+            self.assertIn("missing_roots=1", proc.stdout)
+            data = json.loads(subprocess.check_output(
+                [sys.executable, str(CLI), "--json", "--path", str(missing)], text=True))
+            self.assertEqual(data["coverage"]["missing_roots"], 1)
+
+    def test_unreadable_directory_and_file_accounting(self):
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "blocked").mkdir()
+            (root / "blocked" / "hidden").write_text("hidden")
+            (root / "unreadable").write_text("secret")
+            (root / "visible").write_text("visible")
+            mod = load_module()
+            real_access = mod.os.access
+            def mock_access(path, mode):
+                return Path(path).name not in {"blocked", "unreadable"} and real_access(path, mode)
+            from unittest.mock import patch
+            with patch.object(mod.os, "access", side_effect=mock_access):
+                report = mod.scan([str(root), str(root / "blocked")], 20)
+            self.assertEqual(report["coverage"]["unreadable_directories"], 1)
+            self.assertEqual(report["coverage"]["unreadable_files"], 1)
+            self.assertEqual(report["coverage"]["unreadable_roots"], 1)
+            self.assertEqual(report["coverage"]["visited_files"], 2)
 
 
 if __name__ == "__main__":

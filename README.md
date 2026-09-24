@@ -40,7 +40,7 @@ For every Mach-O candidate it calls `lipo -archs` and reports only Intel-only fi
 - Scoped scan with `--max-files` safety cap.
 - Reports local paths because paths are necessary for diagnosis; review/redact output before sharing it.
 
-## Bundled helpers and scan coverage (v0.3.0)
+## Bundled helpers and scan coverage (v0.4.0)
 
 Default recursive scans skip `Contents/Resources` and `node_modules`. These can
 contain executable helpers, so a zero-finding app-root scan is **not** a whole-app
@@ -58,9 +58,14 @@ JSON adds `coverage.include_bundled`, `excluded_directories`,
 `file_limit_reached`. The cap counts files across all roots, including explicit
 file arguments, not only Mach-O files. `file_limit_reached: true` means another
 file was omitted; text output also warns that results are partial. Narrow the
-scope or deliberately increase the cap. A false flag does not prove coverage:
-missing paths, permission failures, excluded directories and non-recognized
-binary formats can still hide components. Expanded scans may be slower.
+scope or deliberately increase the cap. v0.4.0 also counts missing roots,
+unreadable roots, unreadable directories and unreadable files in `coverage`
+without printing their paths; text and quiet modes warn when any count is
+nonzero. Run `--json` to inspect the aggregate counts. Missing default paths
+are common; a zero-finding scan with gaps is still not a compatibility verdict.
+A false cap flag does not prove coverage: excluded directories, races,
+unrecognized binary formats and permissions can still hide components.
+Expanded scans may be slower.
 
 ## Limitations
 
@@ -92,7 +97,7 @@ compile-only integration on macOS. The compiled objects are not executed.
 ## Illustrative output (not a device measurement)
 
 ```text
-IntelGhost v0.3.0 — read-only Intel-only component scan
+IntelGhost v0.4.0 — read-only Intel-only component scan
 Rosetta: installed
 Mach-O scanned: 42  skipped: 0
 Intel-only findings: 1

@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from typing import Iterable
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 MACHO_MAGICS = {b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xca\xfe\xba\xbe", b"\xca\xfe\xba\xbf"}
 COMPONENT_SUFFIXES = {
     ".app": "app",
@@ -58,10 +58,20 @@ def is_macho(path: Path) -> bool:
 
 def iter_files(roots: Iterable[Path], max_files: int, include_bundled=False, coverage=None) -> Iterable[Path]:
     coverage = coverage if coverage is not None else {}
-    coverage.update(visited_files=0, file_limit_reached=False)
+    coverage.update(visited_files=0, file_limit_reached=False, missing_roots=0,
+                    unreadable_roots=0, unreadable_directories=0, unreadable_files=0)
     excluded = SKIP_DIRS - {"node_modules"} if include_bundled else SKIP_DIRS
     for root in roots:
-        if not root.exists():
+        try:
+            root.stat()
+        except FileNotFoundError:
+            coverage["missing_roots"] += 1
+            continue
+        except OSError:
+            coverage["unreadable_roots"] += 1
+            continue
+        if not os.access(root, os.R_OK):
+            coverage["unreadable_roots"] += 1
             continue
         if root.is_file():
             if coverage["visited_files"] >= max_files:
@@ -70,8 +80,21 @@ def iter_files(roots: Iterable[Path], max_files: int, include_bundled=False, cov
             coverage["visited_files"] += 1
             yield root
             continue
-        for dirpath, dirnames, filenames in os.walk(root, topdown=True):
-            dirnames[:] = sorted(d for d in dirnames if d not in excluded)
+        if not root.is_dir():
+            coverage["unreadable_roots"] += 1
+            continue
+        def walk_error(_error):
+            coverage["unreadable_directories"] += 1
+        for dirpath, dirnames, filenames in os.walk(root, topdown=True, onerror=walk_error):
+            readable = []
+            for name in dirnames:
+                if name in excluded:
+                    continue
+                if not os.access(Path(dirpath) / name, os.R_OK | os.X_OK):
+                    coverage["unreadable_directories"] += 1
+                    continue
+                readable.append(name)
+            dirnames[:] = sorted(readable)
             if not include_bundled and Path(dirpath).name == "Contents":
                 dirnames[:] = [d for d in dirnames if d != "Resources"]
             for name in sorted(filenames):
@@ -138,6 +161,9 @@ def scan(paths: list[str], max_files: int, include_bundled=False) -> dict:
     skipped = 0
     scanned = 0
     for path in iter_files(roots, max_files, include_bundled, coverage):
+        if not os.access(path, os.R_OK):
+            coverage["unreadable_files"] += 1
+            continue
         if not is_macho(path):
             continue
         scanned += 1
@@ -178,6 +204,9 @@ def print_text(report: dict, quiet: bool) -> None:
         print("Scope warning: recursive scans skip Contents/Resources and node_modules; use --include-bundled for helpers there.")
     if coverage["file_limit_reached"]:
         print("Scope warning: file limit reached; results are partial.")
+    gaps = {k: coverage[k] for k in ("missing_roots", "unreadable_roots", "unreadable_directories", "unreadable_files") if coverage[k]}
+    if gaps:
+        print("Scope warning: missing/unreadable inputs; results are partial: " + ", ".join(f"{k}={v}" for k, v in gaps.items()))
     if not quiet:
         print(f"IntelGhost v{VERSION} — read-only Intel-only component scan")
         print(f"Rosetta: {report['rosetta']}")
